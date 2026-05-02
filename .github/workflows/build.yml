@@ -28,6 +28,16 @@ jobs:
           sudo apt update
           sudo apt install -y ffmpeg binutils
 
+      - name: Create missing folders
+        # FR : assets/ et fonts/ sont optionnels dans le repo (contenu binaire).
+        #      PyInstaller plante si un dossier listé dans le .spec n'existe pas.
+        #      On les crée vides ici pour éviter l'erreur "Unable to find".
+        # EN : assets/ and fonts/ are optional in the repo (binary content).
+        #      PyInstaller crashes if a folder listed in the .spec doesn't exist.
+        #      We create them empty here to prevent the "Unable to find" error.
+        run: |
+          mkdir -p assets fonts
+
       - name: Install Python dependencies
         run: |
           pip install --upgrade pip
@@ -42,28 +52,18 @@ jobs:
 
       - name: Build with PyInstaller (onedir)
         run: |
-          # FR : --onedir crée un dossier au lieu d'un seul fichier.
-          #      Plus rapide au démarrage et plus stable avec les libs natives.
-          #      --copy-metadata est requis pour imageio/moviepy qui appellent
-          #      importlib.metadata.version() à l'import — sans ça, crash immédiat.
-          # EN : --onedir creates a folder instead of a single file.
-          #      Faster startup and more stable with native libraries.
-          #      --copy-metadata is required for imageio/moviepy which call
-          #      importlib.metadata.version() on import — without this, instant crash.
+          # FR : On utilise le .spec du projet qui gère l'inclusion conditionnelle
+          #      de assets/ et fonts/. Plus maintenable que les flags CLI.
+          #      --copy-metadata est passé en CLI car non supporté dans le .spec.
+          # EN : We use the project .spec which handles conditional inclusion
+          #      of assets/ and fonts/. More maintainable than CLI flags.
+          #      --copy-metadata is passed via CLI as it's not supported in .spec.
           pyinstaller \
-            --onedir \
-            --name SubmagicLocal \
-            --add-data "src:src" \
-            --add-data "assets:assets" \
-            --add-data "fonts:fonts" \
             --copy-metadata imageio \
             --copy-metadata moviepy \
             --copy-metadata numpy \
             --copy-metadata whisperx \
-            --exclude-module matplotlib \
-            --exclude-module tkinter \
-            --exclude-module unittest \
-            src/app.py
+            submagic.spec
 
       - name: Strip & remove CUDA/test bloat
         run: |
@@ -150,6 +150,15 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Create missing folders
+        # FR : Même raison que Linux — assets/ et fonts/ doivent exister pour le .spec.
+        #      PowerShell sur Windows : Test-Path + New-Item au lieu de mkdir -p.
+        # EN : Same reason as Linux — assets/ and fonts/ must exist for the .spec.
+        #      PowerShell on Windows: Test-Path + New-Item instead of mkdir -p.
+        run: |
+          if (-not (Test-Path "assets")) { New-Item -ItemType Directory -Path "assets" }
+          if (-not (Test-Path "fonts"))  { New-Item -ItemType Directory -Path "fonts"  }
+
       - name: Install dependencies
         run: |
           pip install --upgrade pip
@@ -162,27 +171,16 @@ jobs:
 
       - name: Build EXE
         run: |
-          # FR : --onefile produit un seul .exe (extraction dans %TEMP% au lancement).
-          #      --windowed supprime la console noire au démarrage.
-          #      Séparateur des --add-data est ";" sur Windows (vs ":" sur Unix).
-          # EN : --onefile produces a single .exe (extracts to %TEMP% on launch).
-          #      --windowed suppresses the black console window on startup.
-          #      --add-data separator is ";" on Windows (vs ":" on Unix).
+          # FR : On utilise le .spec commun aux 3 plateformes.
+          #      Le .spec gère assets/ et fonts/ de façon conditionnelle.
+          # EN : We use the .spec shared across all 3 platforms.
+          #      The .spec handles assets/ and fonts/ conditionally.
           pyinstaller `
-            --onefile `
-            --windowed `
-            --name SubmagicLocal `
-            --add-data "src;src" `
-            --add-data "assets;assets" `
-            --add-data "fonts;fonts" `
             --copy-metadata imageio `
             --copy-metadata moviepy `
             --copy-metadata numpy `
             --copy-metadata whisperx `
-            --exclude-module matplotlib `
-            --exclude-module tkinter `
-            --exclude-module unittest `
-            src/app.py
+            submagic.spec
 
       - name: Upload EXE to Release
         uses: softprops/action-gh-release@v2
@@ -209,6 +207,10 @@ jobs:
       - name: Install system dependencies
         run: brew install ffmpeg
 
+      - name: Create missing folders
+        run: |
+          mkdir -p assets fonts
+
       - name: Install Python dependencies
         run: |
           pip install --upgrade pip
@@ -223,26 +225,14 @@ jobs:
         run: |
           # FR : --onedir est préférable à --onefile sur macOS — plus stable avec
           #      les frameworks natifs (Tk, AVFoundation, etc.).
-          #      --osx-bundle-identifier est requis pour codesign.
           # EN : --onedir is preferred over --onefile on macOS — more stable with
           #      native frameworks (Tk, AVFoundation, etc.).
-          #      --osx-bundle-identifier is required for codesign.
           pyinstaller \
-            --onedir \
-            --windowed \
-            --name SubmagicLocal \
-            --add-data "src:src" \
-            --add-data "assets:assets" \
-            --add-data "fonts:fonts" \
             --copy-metadata imageio \
             --copy-metadata moviepy \
             --copy-metadata numpy \
             --copy-metadata whisperx \
-            --exclude-module matplotlib \
-            --exclude-module tkinter \
-            --exclude-module unittest \
-            --osx-bundle-identifier com.submagic.local \
-            src/app.py
+            submagic.spec
 
       - name: Sign app ad-hoc
         run: |

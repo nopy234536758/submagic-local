@@ -1,4 +1,4 @@
-name: Build Submagic Local
+name: Build Submagic Local (All platforms)
 
 on:
   push:
@@ -50,11 +50,13 @@ jobs:
           APPRUN
           chmod +x SubmagicLocal.AppDir/AppRun
           ./appimagetool-x86_64.AppImage SubmagicLocal.AppDir SubmagicLocal.AppImage
-      - name: Upload AppImage
-        uses: actions/upload-artifact@v4
+      - name: Upload AppImage to Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
         with:
-          name: SubmagicLocal-linux
-          path: SubmagicLocal.AppImage
+          files: SubmagicLocal.AppImage
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-windows:
     runs-on: windows-latest
@@ -71,11 +73,13 @@ jobs:
       - name: Build EXE
         run: |
           pyinstaller --onefile --windowed --name SubmagicLocal --add-data "src;src" src/app.py
-      - name: Upload EXE
-        uses: actions/upload-artifact@v4
+      - name: Upload EXE to Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
         with:
-          name: SubmagicLocal-windows
-          path: dist/SubmagicLocal.exe
+          files: dist/SubmagicLocal.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-macos:
     runs-on: macos-latest
@@ -95,8 +99,14 @@ jobs:
       - name: Build macOS app
         run: |
           pyinstaller --onefile --windowed --name SubmagicLocal --add-data "src:src" src/app.py
-      - name: Upload app bundle
-        uses: actions/upload-artifact@v4
+      - name: Compress macOS app bundle
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          zip -r SubmagicLocal-macos.zip dist/SubmagicLocal
+      - name: Upload macOS bundle to Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
         with:
-          name: SubmagicLocal-macos
-          path: dist/SubmagicLocal
+          files: SubmagicLocal-macos.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

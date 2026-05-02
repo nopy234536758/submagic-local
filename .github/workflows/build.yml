@@ -1,0 +1,100 @@
+name: Build Submagic Local
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install system dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y ffmpeg
+      - name: Install Python dependencies
+        run: |
+          pip install -r src/requirements.txt
+          pip install pyinstaller
+      - name: Build with PyInstaller (onedir)
+        run: |
+          pyinstaller --onedir --name SubmagicLocal --add-data "src:src" src/app.py
+      - name: Build AppImage
+        run: |
+          wget -c https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool-x86_64.AppImage
+          mkdir -p SubmagicLocal.AppDir/usr/bin
+          cp -r dist/SubmagicLocal/* SubmagicLocal.AppDir/usr/bin/
+          cat > SubmagicLocal.AppDir/SubmagicLocal.desktop << EOF
+          [Desktop Entry]
+          Name=Submagic Local
+          Exec=SubmagicLocal
+          Icon=submagic
+          Type=Application
+          Categories=Video;
+          EOF
+          touch SubmagicLocal.AppDir/submagic.png
+          cat > SubmagicLocal.AppDir/AppRun << 'APPRUN'
+          #!/bin/bash
+          HERE="\$(dirname "\$(readlink -f "\${0}")")"
+          exec "\$HERE/usr/bin/SubmagicLocal" "\$@"
+          APPRUN
+          chmod +x SubmagicLocal.AppDir/AppRun
+          ./appimagetool-x86_64.AppImage SubmagicLocal.AppDir SubmagicLocal.AppImage
+      - name: Upload AppImage
+        uses: actions/upload-artifact@v4
+        with:
+          name: SubmagicLocal-linux
+          path: SubmagicLocal.AppImage
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: |
+          pip install -r src/requirements.txt
+          pip install pyinstaller
+      - name: Build EXE
+        run: |
+          pyinstaller --onefile --windowed --name SubmagicLocal --add-data "src;src" src/app.py
+      - name: Upload EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: SubmagicLocal-windows
+          path: dist/SubmagicLocal.exe
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install system dependencies
+        run: |
+          brew install ffmpeg
+      - name: Install Python dependencies
+        run: |
+          pip install -r src/requirements.txt
+          pip install pyinstaller
+      - name: Build macOS app
+        run: |
+          pyinstaller --onefile --windowed --name SubmagicLocal --add-data "src:src" src/app.py
+      - name: Upload app bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: SubmagicLocal-macos
+          path: dist/SubmagicLocal

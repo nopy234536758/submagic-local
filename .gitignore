@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.so
+
+# Virtual env
+submagic_env/
+venv/
+env/
+
+# Builds
+dist/
+build/
+*.spec
+*.AppImage
+*.exe
+_internal/
+
+# IDE
+.vscode/
+.idea/
+
+# Temp files
+*.log
+*.tmp

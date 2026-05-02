@@ -7,72 +7,149 @@ on:
   workflow_dispatch:
 
 jobs:
+  # ─────────────────────────────────────────────
+  # LINUX — AppImage léger via --onedir + nettoyage
+  # ─────────────────────────────────────────────
   build-linux:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: '3.11'   # 3.11 = meilleur support PyInstaller/torch
+
       - name: Install system dependencies
         run: |
           sudo apt update
-          sudo apt install -y ffmpeg
+          sudo apt install -y ffmpeg binutils
+
       - name: Install Python dependencies
         run: |
+          pip install --upgrade pip
+          # Installer torch CPU-only pour éviter les 3 Go de CUDA
+          pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
           pip install -r src/requirements.txt
           pip install pyinstaller
+
       - name: Build with PyInstaller (onedir)
         run: |
-          pyinstaller --onedir --name SubmagicLocal --add-data "src:src" src/app.py
+          pyinstaller \
+            --onedir \
+            --name SubmagicLocal \
+            --add-data "src:src" \
+            --add-data "assets:assets" \
+            --add-data "fonts:fonts" \
+            --copy-metadata imageio \
+            --copy-metadata moviepy \
+            --copy-metadata numpy \
+            --copy-metadata whisperx \
+            --exclude-module matplotlib \
+            --exclude-module tkinter \
+            --exclude-module unittest \
+            src/app.py
+
+      - name: Strip & remove CUDA/test bloat
+        run: |
+          # Supprimer les fichiers CUDA inutiles (économise ~1 Go)
+          find dist/SubmagicLocal -name "*.so" -path "*/torch/lib/libcuda*" -delete 2>/dev/null || true
+          find dist/SubmagicLocal -name "*.so" -path "*/torch/lib/libnvidia*" -delete 2>/dev/null || true
+          find dist/SubmagicLocal -name "libcublas*" -delete 2>/dev/null || true
+          find dist/SubmagicLocal -name "libcufft*" -delete 2>/dev/null || true
+          find dist/SubmagicLocal -name "libcurand*" -delete 2>/dev/null || true
+          find dist/SubmagicLocal -name "libcusolver*" -delete 2>/dev/null || true
+          find dist/SubmagicLocal -name "libcusparse*" -delete 2>/dev/null || true
+          echo "Taille finale : $(du -sh dist/SubmagicLocal | cut -f1)"
+
       - name: Build AppImage
         env:
           APPIMAGE_EXTRACT_AND_RUN: 1
         run: |
-          wget -c https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          wget -q https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
           chmod +x appimagetool-x86_64.AppImage
+
           mkdir -p SubmagicLocal.AppDir/usr/bin
           cp -r dist/SubmagicLocal/* SubmagicLocal.AppDir/usr/bin/
-          cat > SubmagicLocal.AppDir/SubmagicLocal.desktop << EOF
+
+          # Icône (fallback si pas d'icône dans assets/)
+          if [ -f "assets/icon.png" ]; then
+            cp assets/icon.png SubmagicLocal.AppDir/submagic.png
+          else
+            # Créer une icône PNG minimale valide (1x1 pixel transparent)
+            python3 -c "
+          import base64, pathlib
+          png = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==')
+          pathlib.Path('SubmagicLocal.AppDir/submagic.png').write_bytes(png)
+          "
+          fi
+
+          cat > SubmagicLocal.AppDir/SubmagicLocal.desktop << 'EOF'
           [Desktop Entry]
           Name=Submagic Local
           Exec=SubmagicLocal
           Icon=submagic
           Type=Application
-          Categories=Video;
+          Categories=Video;AudioVideo;
           EOF
-          touch SubmagicLocal.AppDir/submagic.png
+
           cat > SubmagicLocal.AppDir/AppRun << 'APPRUN'
           #!/bin/bash
-          HERE="\$(dirname "\$(readlink -f "\${0}")")"
-          exec "\$HERE/usr/bin/SubmagicLocal" "\$@"
+          HERE="$(dirname "$(readlink -f "${0}")")"
+          export PATH="$HERE/usr/bin:$PATH"
+          export LD_LIBRARY_PATH="$HERE/usr/bin:$LD_LIBRARY_PATH"
+          exec "$HERE/usr/bin/SubmagicLocal" "$@"
           APPRUN
           chmod +x SubmagicLocal.AppDir/AppRun
-          ./appimagetool-x86_64.AppImage SubmagicLocal.AppDir SubmagicLocal.AppImage
+
+          ./appimagetool-x86_64.AppImage SubmagicLocal.AppDir SubmagicLocal-linux-x86_64.AppImage
+
       - name: Upload AppImage to Release
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
-          files: SubmagicLocal.AppImage
+          files: SubmagicLocal-linux-x86_64.AppImage
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  # ─────────────────────────────────────────────
+  # WINDOWS — EXE avec métadonnées imageio/moviepy
+  # ─────────────────────────────────────────────
   build-windows:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: '3.11'
+
       - name: Install dependencies
         run: |
+          pip install --upgrade pip
+          pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
           pip install -r src/requirements.txt
           pip install pyinstaller
+
       - name: Build EXE
         run: |
-          pyinstaller --onefile --windowed --name SubmagicLocal --add-data "src;src" src/app.py
+          pyinstaller `
+            --onefile `
+            --windowed `
+            --name SubmagicLocal `
+            --add-data "src;src" `
+            --add-data "assets;assets" `
+            --add-data "fonts;fonts" `
+            --copy-metadata imageio `
+            --copy-metadata moviepy `
+            --copy-metadata numpy `
+            --copy-metadata whisperx `
+            --exclude-module matplotlib `
+            --exclude-module tkinter `
+            --exclude-module unittest `
+            src/app.py
+
       - name: Upload EXE to Release
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
@@ -81,28 +158,57 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  # ─────────────────────────────────────────────
+  # macOS — .app bundle signé ad-hoc + zip
+  # ─────────────────────────────────────────────
   build-macos:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: '3.11'
+
       - name: Install system dependencies
-        run: |
-          brew install ffmpeg
+        run: brew install ffmpeg
+
       - name: Install Python dependencies
         run: |
+          pip install --upgrade pip
+          pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
           pip install -r src/requirements.txt
           pip install pyinstaller
-      - name: Build macOS app
+
+      - name: Build macOS .app
         run: |
-          pyinstaller --onefile --windowed --name SubmagicLocal --add-data "src:src" src/app.py
+          pyinstaller \
+            --onedir \
+            --windowed \
+            --name SubmagicLocal \
+            --add-data "src:src" \
+            --add-data "assets:assets" \
+            --add-data "fonts:fonts" \
+            --copy-metadata imageio \
+            --copy-metadata moviepy \
+            --copy-metadata numpy \
+            --copy-metadata whisperx \
+            --exclude-module matplotlib \
+            --exclude-module tkinter \
+            --exclude-module unittest \
+            --osx-bundle-identifier com.submagic.local \
+            src/app.py
+
+      - name: Sign app ad-hoc (évite "app endommagée" sur macOS)
+        run: |
+          codesign --force --deep --sign - dist/SubmagicLocal.app
+
       - name: Compress macOS app bundle
-        if: startsWith(github.ref, 'refs/tags/')
         run: |
-          zip -r SubmagicLocal-macos.zip dist/SubmagicLocal
+          cd dist
+          zip -r ../SubmagicLocal-macos.zip SubmagicLocal.app
+
       - name: Upload macOS bundle to Release
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')

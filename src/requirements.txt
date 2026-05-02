@@ -2,7 +2,25 @@ customtkinter>=5.2.0
 opencv-python>=4.8
 numpy>=1.24
 Pillow>=10.0
-whisperx
-torch
 moviepy>=2.0
 pygame>=2.5
+
+# FR : torch et whisperx sont intentionnellement absents de ce fichier.
+#      Ils doivent être installés AVANT via le workflow CI (voir build.yml)
+#      ou manuellement avec la commande suivante pour forcer la version CPU :
+#      pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+#      puis : pip install whisperx
+#
+# EN : torch and whisperx are intentionally excluded from this file.
+#      They must be installed BEFORE this file via the CI workflow (see build.yml)
+#      or manually using the following command to force the CPU-only build:
+#      pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+#      then: pip install whisperx
+#
+# FR : Si torch est listé ici, pip résoudra ses dépendances et installera
+#      automatiquement la version CUDA (~3 Go), ce qui casse les builds
+#      sur les machines sans GPU NVIDIA.
+#
+# EN : If torch is listed here, pip will resolve its dependencies and
+#      automatically install the CUDA build (~3 GB), which breaks builds
+#      on machines without an NVIDIA GPU.

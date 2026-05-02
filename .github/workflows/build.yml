@@ -7,9 +7,10 @@ on:
   workflow_dispatch:
 
 jobs:
-  # ─────────────────────────────────────────────
-  # LINUX — AppImage léger via --onedir + nettoyage
-  # ─────────────────────────────────────────────
+  # ─────────────────────────────────────────────────────────────────────────
+  # LINUX — AppImage léger via --onedir + nettoyage des libs CUDA inutiles
+  # LINUX — Lightweight AppImage via --onedir + cleanup of unused CUDA libs
+  # ─────────────────────────────────────────────────────────────────────────
   build-linux:
     runs-on: ubuntu-latest
     steps:
@@ -18,7 +19,9 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'   # 3.11 = meilleur support PyInstaller/torch
+          # FR : Python 3.11 recommandé — meilleur support PyInstaller/torch que 3.12
+          # EN : Python 3.11 recommended — better PyInstaller/torch support than 3.12
+          python-version: '3.11'
 
       - name: Install system dependencies
         run: |
@@ -28,13 +31,25 @@ jobs:
       - name: Install Python dependencies
         run: |
           pip install --upgrade pip
-          # Installer torch CPU-only pour éviter les 3 Go de CUDA
+          # FR : Installer torch CPU-only en premier pour éviter ~3 Go de libs CUDA.
+          #      whisperx doit être installé APRÈS torch pour réutiliser ce build CPU.
+          # EN : Install CPU-only torch first to avoid ~3 GB of CUDA libraries.
+          #      whisperx must be installed AFTER torch to reuse this CPU build.
           pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+          pip install whisperx
           pip install -r src/requirements.txt
           pip install pyinstaller
 
       - name: Build with PyInstaller (onedir)
         run: |
+          # FR : --onedir crée un dossier au lieu d'un seul fichier.
+          #      Plus rapide au démarrage et plus stable avec les libs natives.
+          #      --copy-metadata est requis pour imageio/moviepy qui appellent
+          #      importlib.metadata.version() à l'import — sans ça, crash immédiat.
+          # EN : --onedir creates a folder instead of a single file.
+          #      Faster startup and more stable with native libraries.
+          #      --copy-metadata is required for imageio/moviepy which call
+          #      importlib.metadata.version() on import — without this, instant crash.
           pyinstaller \
             --onedir \
             --name SubmagicLocal \
@@ -52,15 +67,18 @@ jobs:
 
       - name: Strip & remove CUDA/test bloat
         run: |
-          # Supprimer les fichiers CUDA inutiles (économise ~1 Go)
-          find dist/SubmagicLocal -name "*.so" -path "*/torch/lib/libcuda*" -delete 2>/dev/null || true
-          find dist/SubmagicLocal -name "*.so" -path "*/torch/lib/libnvidia*" -delete 2>/dev/null || true
-          find dist/SubmagicLocal -name "libcublas*" -delete 2>/dev/null || true
-          find dist/SubmagicLocal -name "libcufft*" -delete 2>/dev/null || true
-          find dist/SubmagicLocal -name "libcurand*" -delete 2>/dev/null || true
+          # FR : PyInstaller embarque parfois des .so CUDA résiduels même avec torch CPU.
+          #      Cette étape les supprime pour réduire la taille finale (~1 Go économisé).
+          # EN : PyInstaller sometimes bundles residual CUDA .so files even with CPU torch.
+          #      This step removes them to reduce the final size (~1 GB saved).
+          find dist/SubmagicLocal -name "*.so" -path "*/torch/lib/libcuda*"    -delete 2>/dev/null || true
+          find dist/SubmagicLocal -name "*.so" -path "*/torch/lib/libnvidia*"  -delete 2>/dev/null || true
+          find dist/SubmagicLocal -name "libcublas*"   -delete 2>/dev/null || true
+          find dist/SubmagicLocal -name "libcufft*"    -delete 2>/dev/null || true
+          find dist/SubmagicLocal -name "libcurand*"   -delete 2>/dev/null || true
           find dist/SubmagicLocal -name "libcusolver*" -delete 2>/dev/null || true
           find dist/SubmagicLocal -name "libcusparse*" -delete 2>/dev/null || true
-          echo "Taille finale : $(du -sh dist/SubmagicLocal | cut -f1)"
+          echo "FR : Taille finale du bundle / EN : Final bundle size : $(du -sh dist/SubmagicLocal | cut -f1)"
 
       - name: Build AppImage
         env:
@@ -72,11 +90,13 @@ jobs:
           mkdir -p SubmagicLocal.AppDir/usr/bin
           cp -r dist/SubmagicLocal/* SubmagicLocal.AppDir/usr/bin/
 
-          # Icône (fallback si pas d'icône dans assets/)
+          # FR : Utilise l'icône du projet si elle existe, sinon génère un PNG minimal valide.
+          #      appimagetool exige un fichier icône — sans lui, le build échoue silencieusement.
+          # EN : Use the project icon if it exists, otherwise generate a minimal valid PNG.
+          #      appimagetool requires an icon file — without it, the build fails silently.
           if [ -f "assets/icon.png" ]; then
             cp assets/icon.png SubmagicLocal.AppDir/submagic.png
           else
-            # Créer une icône PNG minimale valide (1x1 pixel transparent)
             python3 -c "
           import base64, pathlib
           png = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==')
@@ -93,6 +113,10 @@ jobs:
           Categories=Video;AudioVideo;
           EOF
 
+          # FR : AppRun est le point d'entrée de l'AppImage.
+          #      LD_LIBRARY_PATH doit pointer vers usr/bin où sont les .so bundlés.
+          # EN : AppRun is the AppImage entry point.
+          #      LD_LIBRARY_PATH must point to usr/bin where bundled .so files live.
           cat > SubmagicLocal.AppDir/AppRun << 'APPRUN'
           #!/bin/bash
           HERE="$(dirname "$(readlink -f "${0}")")"
@@ -112,9 +136,10 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # ─────────────────────────────────────────────
-  # WINDOWS — EXE avec métadonnées imageio/moviepy
-  # ─────────────────────────────────────────────
+  # ─────────────────────────────────────────────────────────────────────────
+  # WINDOWS — EXE avec métadonnées imageio/moviepy incluses
+  # WINDOWS — EXE with imageio/moviepy metadata included
+  # ─────────────────────────────────────────────────────────────────────────
   build-windows:
     runs-on: windows-latest
     steps:
@@ -128,12 +153,21 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --upgrade pip
+          # FR : Même ordre que Linux — torch CPU avant whisperx et requirements.
+          # EN : Same order as Linux — CPU torch before whisperx and requirements.
           pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+          pip install whisperx
           pip install -r src/requirements.txt
           pip install pyinstaller
 
       - name: Build EXE
         run: |
+          # FR : --onefile produit un seul .exe (extraction dans %TEMP% au lancement).
+          #      --windowed supprime la console noire au démarrage.
+          #      Séparateur des --add-data est ";" sur Windows (vs ":" sur Unix).
+          # EN : --onefile produces a single .exe (extracts to %TEMP% on launch).
+          #      --windowed suppresses the black console window on startup.
+          #      --add-data separator is ";" on Windows (vs ":" on Unix).
           pyinstaller `
             --onefile `
             --windowed `
@@ -158,9 +192,10 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # ─────────────────────────────────────────────
-  # macOS — .app bundle signé ad-hoc + zip
-  # ─────────────────────────────────────────────
+  # ─────────────────────────────────────────────────────────────────────────
+  # macOS — .app bundle signé ad-hoc pour éviter le blocage Gatekeeper
+  # macOS — .app bundle with ad-hoc signing to bypass Gatekeeper block
+  # ─────────────────────────────────────────────────────────────────────────
   build-macos:
     runs-on: macos-latest
     steps:
@@ -177,12 +212,21 @@ jobs:
       - name: Install Python dependencies
         run: |
           pip install --upgrade pip
+          # FR : Sur macOS, torch CPU évite aussi les dépendances Metal/MPS inutiles.
+          # EN : On macOS, CPU torch also avoids unnecessary Metal/MPS dependencies.
           pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+          pip install whisperx
           pip install -r src/requirements.txt
           pip install pyinstaller
 
       - name: Build macOS .app
         run: |
+          # FR : --onedir est préférable à --onefile sur macOS — plus stable avec
+          #      les frameworks natifs (Tk, AVFoundation, etc.).
+          #      --osx-bundle-identifier est requis pour codesign.
+          # EN : --onedir is preferred over --onefile on macOS — more stable with
+          #      native frameworks (Tk, AVFoundation, etc.).
+          #      --osx-bundle-identifier is required for codesign.
           pyinstaller \
             --onedir \
             --windowed \
@@ -200,8 +244,16 @@ jobs:
             --osx-bundle-identifier com.submagic.local \
             src/app.py
 
-      - name: Sign app ad-hoc (évite "app endommagée" sur macOS)
+      - name: Sign app ad-hoc
         run: |
+          # FR : La signature ad-hoc (identité "-") n'est pas un certificat Apple Developer.
+          #      Elle empêche Gatekeeper d'afficher "app endommagée" sans nécessiter
+          #      de compte Apple payant. L'utilisateur devra quand même faire
+          #      clic droit > Ouvrir la première fois sur macOS 13+.
+          # EN : Ad-hoc signing (identity "-") is not an Apple Developer certificate.
+          #      It prevents Gatekeeper from showing "app is damaged" without requiring
+          #      a paid Apple account. The user will still need to right-click > Open
+          #      the first time on macOS 13+.
           codesign --force --deep --sign - dist/SubmagicLocal.app
 
       - name: Compress macOS app bundle
